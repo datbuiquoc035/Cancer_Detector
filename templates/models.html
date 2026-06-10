@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Models — ClinVar Cancer Detection{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1>Trained Models</h1>
+        <p class="text-secondary">Browse saved model checkpoints and their performance metrics.</p>
+    </div>
+</div>
+
+{% if models %}
+<div class="table-responsive">
+    <table class="table table-hover table-bordered">
+        <thead>
+            <tr>
+                <th>Model</th>
+                <th>Date</th>
+                <th>Size</th>
+                <th>Accuracy</th>
+                <th>AUC</th>
+                <th>F1</th>
+                <th>PR-AUC</th>
+                <th>Epochs</th>
+                <th>Hidden</th>
+                <th class="text-center">Active</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in models %}
+            <tr>
+                <td><code>{{ m.filename }}</code></td>
+                <td>{{ m.mtime }}</td>
+                <td>{{ m.size_mb }} MB</td>
+                {% set fm = m.config.get('final_metrics', {}) %}
+                <td>{{ "%.1f"|format(fm.get('accuracy', 0) * 100) if fm.get('accuracy') else '-' }}%</td>
+                <td>{{ "%.4f"|format(fm.get('auc', 0)) if fm.get('auc') else '-' }}</td>
+                <td>{{ "%.4f"|format(fm.get('f1', 0)) if fm.get('f1') else '-' }}</td>
+                <td>{{ "%.4f"|format(fm.get('pr_auc', 0)) if fm.get('pr_auc') else '-' }}</td>
+                <td>{{ m.config.get('epochs', '-') }}</td>
+                <td>{{ m.config.get('hidden_dims', '-') }}</td>
+                <td class="text-center">
+                    {% if m.is_active %}
+                    <span class="badge bg-success">Active</span>
+                    {% else %}
+                    <span class="badge bg-secondary">Inactive</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="alert alert-warning">No trained models found. <a href="/train" class="alert-link">Train a model</a> first.</div>
+{% endif %}
+{% endblock %}

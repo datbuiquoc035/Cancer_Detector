@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}ClinVar Cancer Detection{% endblock %}
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1 class="display-5">ClinVar Cancer Detection Pipeline</h1>
+        <p class="text-secondary">Neural network-based cancer variant classification using real ClinVar data</p>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">
+                    {% if data_available %}
+                    <span class="badge bg-success me-2">Ready</span>
+                    {% else %}
+                    <span class="badge bg-warning text-dark me-2">No Data</span>
+                    {% endif %}
+                    Training
+                </h5>
+                <p class="card-text text-secondary">Configure and train the ClinVarNet model on genomic variant data.</p>
+                <ul class="small text-secondary">
+                    <li>Architecture: MLP (128-64-32) + BatchNorm</li>
+                    <li>Fixed 8 features: VariationID, CHR, Start/Stop, Gene, Variant Type, Allele lengths</li>
+                    <li>Class weighting for imbalanced data</li>
+                    <li>Hyperparameter tuning, early stopping, multiple schedulers</li>
+                </ul>
+                <a href="/train" class="btn btn-outline-success">Go to Training</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">
+                    {% if model_available %}
+                    <span class="badge bg-success me-2">Ready</span>
+                    {% else %}
+                    <span class="badge bg-danger me-2">No Model</span>
+                    {% endif %}
+                    Detection
+                </h5>
+                <p class="card-text text-secondary">Detect cancer-related variants and predict specific cancer types.</p>
+                <ul class="small text-secondary">
+                    <li>Single variant detection via form</li>
+                    <li>Batch CSV upload for bulk processing</li>
+                    <li>REST API for programmatic access</li>
+                </ul>
+                <a href="/detect" class="btn btn-outline-success">Go to Detection</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Pipeline Status</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless table-sm">
+                    <tbody>
+                        <tr>
+                            <td>Data file (clinvar_extracted.csv)</td>
+                            <td>
+                                {% if data_available %}
+                                <span class="text-success">Found</span>
+                                {% else %}
+                                <span class="text-warning">Missing</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Trained model (.pt)</td>
+                            <td>
+                                {% if model_available %}
+                                <span class="text-success">Available</span>
+                                {% if model_timestamp %}<br><small class="text-secondary">{{ model_timestamp }}</small>{% endif %}
+                                {% else %}
+                                <span class="text-danger">Not found</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Training in progress</td>
+                            <td>
+                                {% if trainer_busy %}
+                                <span class="text-warning">Running</span>
+                                {% else %}
+                                <span class="text-secondary">Idle</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

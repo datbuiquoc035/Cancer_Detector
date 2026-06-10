@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.venv/
+venv/
+env/
+dist/
+build/
+
+# Model files
+output_clinvar/clinvar_model_*.pt
+output_clinvar/config_*.json
+output_clinvar/charts/
+
+# Data
+clinvar_extracted.csv
+variant_summary.txt
+*.gz
+upload_*.csv
+batch_results_*.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

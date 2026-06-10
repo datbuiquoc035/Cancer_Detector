@@ -1,0 +1,455 @@
+{% extends "base.html" %}
+{% block title %}Training — ClinVar Cancer Detection{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1>Model Training</h1>
+        <p class="text-secondary">Configure hyperparameters and train the ClinVarNet classifier.</p>
+    </div>
+</div>
+<script>var TRAINER_BUSY = {{ 'true' if trainer_busy else 'false' }};</script>
+
+<div class="row g-4">
+    <div class="col-md-5">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Configuration</h5>
+            </div>
+            <div class="card-body">
+                {% if not data_exists %}
+                <div class="alert alert-warning py-2 mb-3 d-flex justify-content-between align-items-center" role="alert" id="data-warning">
+                    <span>Data file not found. Please place <code>clinvar_extracted.csv</code> in the project root.</span>
+                </div>
+                {% endif %}
+
+                <form id="train-form">
+                    <input type="hidden" name="data_path" value="{{ data_path }}">
+
+                    <div class="row mb-2">
+                        <div class="col-6">
+                            <label class="form-label small">Epochs</label>
+                            <input type="number" class="form-control form-control-sm" name="epochs" value="5" min="1" max="500">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Batch Size</label>
+                            <input type="number" class="form-control form-control-sm" name="batch_size" value="64" min="8" max="512">
+                        </div>
+                    </div>
+
+                    <div class="row mb-2">
+                        <div class="col-6">
+                            <label class="form-label small">Learning Rate</label>
+                            <input type="number" step="0.0001" class="form-control form-control-sm" name="learning_rate" value="0.001">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Dropout</label>
+                            <input type="number" step="0.05" class="form-control form-control-sm" name="dropout" value="0.3" min="0.1" max="0.8">
+                        </div>
+                    </div>
+
+                    <div class="row mb-2">
+                        <div class="col-6">
+                            <label class="form-label small">Validation Split</label>
+                            <input type="number" step="0.05" class="form-control form-control-sm" name="validation_split" value="0.2" min="0.1" max="0.5">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Hidden Layers</label>
+                            <input type="text" class="form-control form-control-sm" name="hidden_dims" value="128,64,32">
+                        </div>
+                    </div>
+
+                    <div class="row mb-2">
+                        <div class="col-6">
+                            <label class="form-label small">Scheduler</label>
+                            <div class="custom-select">
+                                <button class="custom-select-btn" type="button" onclick="toggleCustomSelect(this)">
+                                    <span class="custom-select-label">ReduceLROnPlateau</span>
+                                    <span class="arrow">&#9660;</span>
+                                </button>
+                                <div class="custom-select-menu">
+                                    <button class="custom-select-item active" type="button" data-value="ReduceLROnPlateau" onclick="selectCustomOption(this)">ReduceLROnPlateau</button>
+                                    <button class="custom-select-item" type="button" data-value="CosineAnnealing" onclick="selectCustomOption(this)">CosineAnnealing</button>
+                                    <button class="custom-select-item" type="button" data-value="StepLR" onclick="selectCustomOption(this)">StepLR</button>
+                                </div>
+                                <input type="hidden" name="scheduler_type" value="ReduceLROnPlateau">
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Gradient Clip</label>
+                            <input type="number" step="0.1" class="form-control form-control-sm" name="gradient_clip" value="1.0" min="0.1" max="10.0">
+                        </div>
+                    </div>
+
+                    <div class="row mb-2">
+                        <div class="col-6">
+                            <label class="form-label small">Random Seed</label>
+                            <input type="number" class="form-control form-control-sm" name="random_seed" value="42">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Sample Size</label>
+                            <input type="number" class="form-control form-control-sm" name="sample_size" value="50000" min="1000" max="1000000">
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="use_class_weights" value="true" checked id="cw">
+                            <label class="form-check-label small" for="cw">Class Weights</label>
+                        </div>
+                    </div>
+
+                    <div class="d-grid gap-2 mt-3">
+                        <button type="submit" class="btn btn-outline-success" id="start-btn" {% if not data_exists %}disabled{% endif %}>Start Training</button>
+                        <button type="button" class="btn btn-outline-danger" id="stop-btn" disabled>Stop Training</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-7">
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Live Log</h5>
+                <span id="status-badge" class="badge bg-secondary">Idle</span>
+            </div>
+            <div class="card-body p-0">
+                <pre id="log-output" class="log-pre p-3 mb-0"></pre>
+                <div id="log-skeleton" class="skeleton" style="height: 300px; margin: 0; display: none;"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Metrics</h5>
+                <span id="eta-display" class="badge bg-warning text-dark">ETA: -</span>
+            </div>
+            <div class="card-body">
+                <div class="row text-center g-2" id="metrics-row">
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2">
+                            <div class="small text-secondary">Epoch</div>
+                            <div id="m-epoch" class="fs-5">-</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2">
+                            <div class="small text-secondary">Train Loss</div>
+                            <div id="m-train-loss" class="fs-5">-</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2">
+                            <div class="small text-secondary">Train Acc</div>
+                            <div id="m-train-acc" class="fs-5">-</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2">
+                            <div class="small text-secondary">Val Acc</div>
+                            <div id="m-val-acc" class="fs-5">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="progress mt-3">
+                    <div id="train-progress" class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                         role="progressbar" style="width: 0%"></div>
+                </div>
+
+                <div id="final-metrics" class="mt-3" style="display: none;">
+                    <h6 class="text-success">Training Complete</h6>
+                    <div class="row text-center g-2" id="final-metrics-row"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="charts-section" class="row mt-4" style="display: none;">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Saved Charts</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-lg-6">
+                        <div class="border rounded p-2 text-center">
+                            <div class="small text-secondary mb-1">Training Curves</div>
+                            <a id="chart-curves-link" href="#" target="_blank">
+                                <img id="chart-curves" class="img-fluid rounded chart-img-bg" src="" alt="Training Curves" style="max-height: 260px;">
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-lg-3">
+                        <div class="border rounded p-2 text-center">
+                            <div class="small text-secondary mb-1">Confusion Matrix</div>
+                            <a id="chart-cm-link" href="#" target="_blank">
+                                <img id="chart-cm" class="img-fluid rounded chart-img-bg" src="" alt="Confusion Matrix" style="max-height: 260px;">
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-lg-3">
+                        <div class="border rounded p-2 text-center">
+                            <div class="small text-secondary mb-1">Class Distribution</div>
+                            <a id="chart-dist-link" href="#" target="_blank">
+                                <img id="chart-dist" class="img-fluid rounded chart-img-bg" src="" alt="Class Distribution" style="max-height: 260px;">
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="border rounded p-2 text-center">
+                            <div class="small text-secondary mb-1">ROC Curve</div>
+                            <a id="chart-roc-link" href="#" target="_blank">
+                                <img id="chart-roc" class="img-fluid rounded chart-img-bg" src="" alt="ROC Curve" style="max-height: 240px;">
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="border rounded p-2 text-center">
+                            <div class="small text-secondary mb-1">PR Curve</div>
+                            <a id="chart-pr-link" href="#" target="_blank">
+                                <img id="chart-pr" class="img-fluid rounded chart-img-bg" src="" alt="PR Curve" style="max-height: 240px;">
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="border rounded p-2 text-center">
+                            <div class="small text-secondary mb-1">Probability Distribution</div>
+                            <a id="chart-probability_dist-link" href="#" target="_blank">
+                                <img id="chart-probability_dist" class="img-fluid rounded chart-img-bg" src="" alt="Probability Distribution" style="max-height: 240px;">
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let eventSource = null;
+const logOutput = document.getElementById('log-output');
+const startBtn = document.getElementById('start-btn');
+const stopBtn = document.getElementById('stop-btn');
+const trainForm = document.getElementById('train-form');
+const progressBar = document.getElementById('train-progress');
+const statusBadge = document.getElementById('status-badge');
+const etaDisplay = document.getElementById('eta-display');
+const finalMetrics = document.getElementById('final-metrics');
+const chartsSection = document.getElementById('charts-section');
+
+function appendLog(msg) {
+    const line = document.createElement('div');
+    line.textContent = msg;
+    logOutput.appendChild(line);
+    logOutput.scrollTop = logOutput.scrollHeight;
+}
+
+function setMetrics(epoch, total, trainLoss, trainAcc, valLoss, valAcc, bestValAcc, eta) {
+    document.getElementById('m-epoch').textContent = `${epoch + 1}/${total}`;
+    document.getElementById('m-train-loss').textContent = trainLoss;
+    document.getElementById('m-train-acc').textContent = (trainAcc * 100).toFixed(1) + '%';
+    document.getElementById('m-val-acc').textContent = (valAcc * 100).toFixed(1) + '%';
+    etaDisplay.textContent = 'ETA: ' + eta;
+}
+
+function restoreFromSnapshot(state) {
+    document.getElementById('log-skeleton').style.display = 'none';
+    logOutput.style.display = 'block';
+    logOutput.innerHTML = '';
+    for (const entry of state.log_buffer) {
+        if (entry.type === 'log') appendLog(entry.message);
+        else if (entry.type === 'metrics') {
+            progressBar.style.width = entry.progress + '%';
+            setMetrics(entry.epoch, entry.total_epochs, entry.train_loss, entry.train_acc,
+                       entry.val_loss, entry.val_acc, entry.best_val_acc, entry.eta);
+        } else if (entry.type === 'complete') {
+            showFinalMetrics(entry.metrics);
+            showCharts(entry.metrics);
+            eventSource.close();
+            return;
+        } else if (entry.type === 'error') {
+            appendLog('ERROR: ' + entry.message);
+        }
+    }
+    statusBadge.textContent = 'Training';
+    statusBadge.className = 'badge bg-warning text-dark';
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    progressBar.style.width = state.progress + '%';
+}
+
+function connectSSE() {
+    if (eventSource) eventSource.close();
+    eventSource = new EventSource('/train/stream');
+
+    eventSource.onmessage = function(e) {
+        if (e.data === '') return;
+        try {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'heartbeat') return;
+            if (msg.type === 'snapshot') {
+                if (msg.state.is_training || msg.state.log_buffer.length > 0) {
+                    restoreFromSnapshot(msg.state);
+                }
+                return;
+            }
+
+            if (msg.type === 'log') {
+                document.getElementById('log-skeleton').style.display = 'none';
+                logOutput.style.display = 'block';
+                appendLog(msg.message);
+            } else if (msg.type === 'metrics') {
+                progressBar.style.width = msg.progress + '%';
+                setMetrics(msg.epoch, msg.total_epochs, msg.train_loss, msg.train_acc,
+                           msg.val_loss, msg.val_acc, msg.best_val_acc, msg.eta);
+            } else if (msg.type === 'complete') {
+                statusBadge.textContent = 'Completed';
+                statusBadge.className = 'badge bg-success';
+                progressBar.style.width = '100%';
+                progressBar.className = 'progress-bar bg-success';
+                appendLog('--- Training completed successfully ---');
+                showFinalMetrics(msg.metrics);
+                showCharts(msg.metrics);
+                stopBtn.disabled = true;
+                startBtn.disabled = false;
+                eventSource.close();
+            } else if (msg.type === 'error') {
+                statusBadge.textContent = 'Error';
+                statusBadge.className = 'badge bg-danger';
+                appendLog('ERROR: ' + msg.message);
+                stopBtn.disabled = true;
+                startBtn.disabled = false;
+                eventSource.close();
+            }
+        } catch(e) {
+            console.error('SSE parse error:', e);
+        }
+    };
+
+    let reconnectAttempts = 0;
+    eventSource.onerror = function() {
+        reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+        eventSource.close();
+        fetch('/train/status').then(r => r.json()).then(data => {
+            if (!data.is_training && statusBadge.textContent !== 'Completed') {
+                statusBadge.textContent = 'Idle';
+                statusBadge.className = 'badge bg-secondary';
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            } else if (data.is_training) {
+                setTimeout(connectSSE, delay);
+            }
+        }).catch(() => {
+            setTimeout(connectSSE, delay);
+        });
+    };
+}
+
+function showFinalMetrics(metrics) {
+    finalMetrics.style.display = 'block';
+    const row = document.getElementById('final-metrics-row');
+    row.innerHTML = '';
+    map.labels = {
+        'chart-curves': 'Training Curves',
+        'chart-cm': 'Confusion Matrix',
+        'chart-dist': 'Class Distribution',
+        'chart-roc': 'ROC Curve',
+        'chart-pr': 'PR Curve',
+        'chart-probability_dist': 'Probability Distribution',
+    };
+    const items = [
+        {label: 'Accuracy', value: (metrics.accuracy * 100).toFixed(1) + '%'},
+        {label: 'AUC', value: metrics.auc.toFixed(4)},
+        {label: 'F1', value: metrics.f1.toFixed(4)},
+        {label: 'PR-AUC', value: metrics.pr_auc.toFixed(4)},
+    ];
+    items.forEach(item => {
+        const col = document.createElement('div');
+        col.innerHTML = `<div class="border border-secondary rounded p-2">
+            <div class="small text-secondary">${item.label}</div>
+            <div class="fs-6 text-success">${item.value}</div>
+        </div>`;
+        row.appendChild(col);
+    });
+}
+
+function showCharts(metrics) {
+    if (!metrics.chart_urls) return;
+    chartsSection.style.display = 'block';
+    const map = {
+        'chart-curves': 'curves',
+        'chart-cm': 'cm',
+        'chart-dist': 'distribution',
+        'chart-roc': 'roc',
+        'chart-pr': 'pr',
+        'chart-probability_dist': 'probability_dist',
+    };
+    for (const [imgId, key] of Object.entries(map)) {
+        const img = document.getElementById(imgId);
+        const link = document.getElementById(imgId + '-link');
+        if (metrics.chart_urls[key]) {
+            img.src = metrics.chart_urls[key];
+            link.href = metrics.chart_urls[key];
+        }
+    }
+}
+
+trainForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    if (startBtn.disabled) return;
+
+    logOutput.innerHTML = '';
+    logOutput.style.display = 'none';
+    document.getElementById('log-skeleton').style.display = 'block';
+    finalMetrics.style.display = 'none';
+    chartsSection.style.display = 'none';
+    progressBar.style.width = '0%';
+    progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-success';
+
+    const formData = new FormData(this);
+    fetch('/train', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'ok') {
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                statusBadge.textContent = 'Training';
+                statusBadge.className = 'badge bg-warning text-dark';
+                appendLog('Training started...');
+                connectSSE();
+            } else {
+                appendLog('Error: ' + data.message);
+            }
+        })
+        .catch(err => appendLog('Error: ' + err));
+});
+
+stopBtn.addEventListener('click', function() {
+    fetch('/train/stop', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => appendLog(data.message));
+    stopBtn.disabled = true;
+});
+
+// Auto-connect if training is already in progress (e.g. after tab switch)
+if (TRAINER_BUSY) {
+    document.addEventListener('DOMContentLoaded', function() {
+        logOutput.innerHTML = '';
+        logOutput.style.display = 'none';
+        document.getElementById('log-skeleton').style.display = 'block';
+        finalMetrics.style.display = 'none';
+        chartsSection.style.display = 'none';
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        statusBadge.textContent = 'Training';
+        statusBadge.className = 'badge bg-warning text-dark';
+        connectSSE();
+    });
+}
+</script>
+{% endblock %}

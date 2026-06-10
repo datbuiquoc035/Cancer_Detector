@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% block title %}Detection — ClinVar Cancer Detection{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1>Cancer Detection</h1>
+        <p class="text-secondary">Predict cancer probability and type for a genomic variant.</p>
+    </div>
+</div>
+
+{% if not model_available %}
+<div class="alert alert-warning" role="alert">
+    No trained model found. Please train a model first via the <a href="/train" class="alert-link">Training page</a>.
+</div>
+{% endif %}
+
+<div class="row g-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Variant Information</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="/detect" id="detect-form">
+                    {% set chr = form_data.chromosome if form_data else '17' %}
+                    {% set pos = form_data.position if form_data else '43044295' %}
+                    {% set gene = form_data.gene if form_data else 'BRCA1' %}
+                    {% set vt = form_data.variant_type if form_data else 'Missense' %}
+                    {% set ref = form_data.ref_allele if form_data else 'G' %}
+                    {% set alt = form_data.alt_allele if form_data else 'A' %}
+                    {% set cs = form_data.clinical_significance if form_data else 'Pathogenic' %}
+
+                    <div class="row mb-2">
+                        <div class="col-6">
+                            <label class="form-label small">Chromosome</label>
+                            <input type="text" class="form-control form-control-sm"
+                                   name="chromosome" value="{{ chr }}" placeholder="e.g. 17, X, MT">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Position</label>
+                            <input type="number" class="form-control form-control-sm"
+                                   name="position" value="{{ pos }}">
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label small">Gene Symbol</label>
+                        <input type="text" class="form-control form-control-sm"
+                               name="gene" value="{{ gene }}" placeholder="e.g. BRCA1, EGFR, TP53">
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label small">Variant Type</label>
+                        <div class="custom-select">
+                            <button class="custom-select-btn" type="button" onclick="toggleCustomSelect(this)">
+                                <span class="custom-select-label">{{ vt }}</span>
+                                <span class="arrow">&#9660;</span>
+                            </button>
+                            <div class="custom-select-menu">
+                                <button class="custom-select-item{{ ' active' if vt == 'Missense' }}" type="button" data-value="Missense" onclick="selectCustomOption(this)">Missense</button>
+                                <button class="custom-select-item{{ ' active' if vt == 'SNP' }}" type="button" data-value="SNP" onclick="selectCustomOption(this)">SNP</button>
+                                <button class="custom-select-item{{ ' active' if vt == 'Frameshift' }}" type="button" data-value="Frameshift" onclick="selectCustomOption(this)">Frameshift</button>
+                                <button class="custom-select-item{{ ' active' if vt == 'Nonsense' }}" type="button" data-value="Nonsense" onclick="selectCustomOption(this)">Nonsense</button>
+                                <button class="custom-select-item{{ ' active' if vt == 'Deletion' }}" type="button" data-value="Deletion" onclick="selectCustomOption(this)">Deletion</button>
+                                <button class="custom-select-item{{ ' active' if vt == 'Insertion' }}" type="button" data-value="Insertion" onclick="selectCustomOption(this)">Insertion</button>
+                                <button class="custom-select-item{{ ' active' if vt == 'Indel' }}" type="button" data-value="Indel" onclick="selectCustomOption(this)">Indel</button>
+                                <button class="custom-select-item{{ ' active' if vt == 'Duplication' }}" type="button" data-value="Duplication" onclick="selectCustomOption(this)">Duplication</button>
+                            </div>
+                            <input type="hidden" name="variant_type" value="{{ vt }}">
+                        </div>
+                    </div>
+
+                    <div class="row mb-2">
+                        <div class="col-6">
+                            <label class="form-label small">Ref Allele</label>
+                            <input type="text" class="form-control form-control-sm" name="ref_allele" value="{{ ref }}">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Alt Allele</label>
+                            <input type="text" class="form-control form-control-sm" name="alt_allele" value="{{ alt }}">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label small">Clinical Significance</label>
+                        <div class="custom-select">
+                            <button class="custom-select-btn" type="button" onclick="toggleCustomSelect(this)">
+                                <span class="custom-select-label">{{ cs }}</span>
+                                <span class="arrow">&#9660;</span>
+                            </button>
+                            <div class="custom-select-menu">
+                                <button class="custom-select-item{{ ' active' if cs == 'Pathogenic' }}" type="button" data-value="Pathogenic" onclick="selectCustomOption(this)">Pathogenic</button>
+                                <button class="custom-select-item{{ ' active' if cs == 'Likely Pathogenic' }}" type="button" data-value="Likely Pathogenic" onclick="selectCustomOption(this)">Likely Pathogenic</button>
+                                <button class="custom-select-item{{ ' active' if cs == 'Uncertain Significance' }}" type="button" data-value="Uncertain Significance" onclick="selectCustomOption(this)">Uncertain Significance</button>
+                                <button class="custom-select-item{{ ' active' if cs == 'Likely Benign' }}" type="button" data-value="Likely Benign" onclick="selectCustomOption(this)">Likely Benign</button>
+                                <button class="custom-select-item{{ ' active' if cs == 'Benign' }}" type="button" data-value="Benign" onclick="selectCustomOption(this)">Benign</button>
+                                <button class="custom-select-item{{ ' active' if cs == 'Conflicting' }}" type="button" data-value="Conflicting" onclick="selectCustomOption(this)">Conflicting</button>
+                                <button class="custom-select-item{{ ' active' if cs == 'risk factor' }}" type="button" data-value="risk factor" onclick="selectCustomOption(this)">Risk Factor</button>
+                                <button class="custom-select-item{{ ' active' if cs == 'drug response' }}" type="button" data-value="drug response" onclick="selectCustomOption(this)">Drug Response</button>
+                            </div>
+                            <input type="hidden" name="clinical_significance" value="{{ cs }}">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-outline-success w-100" id="detect-btn" {% if not model_available %}disabled{% endif %}>
+                        <span id="detect-btn-text">Detect Cancer</span>
+                        <span id="detect-spinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5 class="mb-0">Batch Detection</h5>
+            </div>
+            <div class="card-body">
+                <form action="/detect/batch" method="POST" enctype="multipart/form-data">
+                    <div class="mb-2">
+                        <label class="form-label small">Upload CSV</label>
+                        <input type="file" class="form-control form-control-sm" name="file" accept=".csv" {% if not model_available %}disabled{% endif %}>
+                        <small class="text-secondary">Columns: Chromosome, Position, Gene, Variant_Type</small>
+                    </div>
+                    <button type="submit" class="btn btn-outline-info btn-sm w-100" {% if not model_available %}disabled{% endif %}>
+                        Upload & Detect (Download CSV)
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Detection Result</h5>
+            </div>
+            <div class="card-body">
+                {% if error %}
+                <div class="alert alert-danger py-2 mb-2" id="error-alert">{{ error }}</div>
+                {% endif %}
+
+                {% if result %}
+                <div class="d-flex gap-2 mb-3">
+                    <button class="btn btn-outline-info btn-sm" onclick="copyResult()">Copy Result</button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="downloadResult()">Download CSV</button>
+                </div>
+
+                <div class="mb-3">
+                    <h6 class="text-secondary">Variant Info</h6>
+                    <table class="table table-borderless table-sm">
+                        <tr><td>Gene</td><td class="fw-bold">{{ result.variant_info.gene }}</td></tr>
+                        <tr><td>Chromosome</td><td>{{ result.variant_info.chromosome }}</td></tr>
+                        <tr><td>Position</td><td>{{ result.variant_info.position }}</td></tr>
+                        <tr><td>Type</td><td>{{ result.variant_info.variant_type }}</td></tr>
+                    </table>
+                </div>
+
+                <div class="mb-3">
+                    <h6 class="text-secondary">Cancer Risk Assessment</h6>
+                    <div class="row text-center g-2">
+                        {% set risk = result.cancer_detection.risk_level %}
+                        <div class="col-6 col-md-4">
+                            <div class="border rounded p-2 {% if risk == 'HIGH' %}border-danger{% elif risk == 'MEDIUM' %}border-warning{% else %}border-secondary{% endif %}">
+                                <div class="small text-secondary">Probability</div>
+                                <div class="fs-4 fw-bold {% if risk == 'HIGH' %}text-danger{% elif risk == 'MEDIUM' %}text-warning{% else %}text-light{% endif %}">
+                                    {{ result.cancer_detection.cancer_probability }}%
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <div class="border rounded p-2 {% if risk == 'HIGH' %}border-danger{% elif risk == 'MEDIUM' %}border-warning{% else %}border-secondary{% endif %}">
+                                <div class="small text-secondary">Risk Level</div>
+                                <div class="fs-5 fw-bold {% if risk == 'HIGH' %}text-danger{% elif risk == 'MEDIUM' %}text-warning{% else %}text-light{% endif %}">
+                                    {{ risk }}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <div class="border rounded p-2 {% if result.cancer_detection.is_pathogenic %}border-danger{% else %}border-secondary{% endif %}">
+                                <div class="small text-secondary">Pathogenic</div>
+                                <div class="fs-5 fw-bold {% if result.cancer_detection.is_pathogenic %}text-danger{% else %}text-success{% endif %}">
+                                    {{ 'YES' if result.cancer_detection.is_pathogenic else 'NO' }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <h6 class="text-secondary">Predicted Cancer Types</h6>
+                    {% if result.cancer_type_prediction.cancer_types %}
+                    <div class="list-group list-group-flush">
+                        {% for cancer_type, confidence in result.cancer_type_prediction.cancer_types.items() %}
+                        <div class="list-group-item d-flex justify-content-between align-items-center py-1">
+                            <span>{{ cancer_type }}</span>
+                            <span class="badge {% if confidence > 50 %}bg-danger{% elif confidence > 20 %}bg-warning text-dark{% else %}bg-secondary{% endif %} rounded-pill">
+                                {{ "%.1f"|format(confidence) }}%
+                            </span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-secondary">
+                        {{ result.cancer_type_prediction.note if result.cancer_type_prediction.note else 'No predictions available.' }}
+                    </p>
+                    {% endif %}
+                </div>
+                {% else %}
+                <div class="text-center text-secondary py-5">
+                    <p class="fs-1 mb-2">&#9754;</p>
+                    <p>Enter variant details and click "Detect Cancer" to see results.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('detect-form').addEventListener('submit', function() {
+        document.getElementById('detect-btn').disabled = true;
+        document.getElementById('detect-btn-text').textContent = 'Detecting...';
+        document.getElementById('detect-spinner').classList.remove('d-none');
+    });
+});
+
+function copyResult() {
+    const rows = [];
+    document.querySelectorAll('.table tr').forEach(tr => {
+        const tds = tr.querySelectorAll('td');
+        if (tds.length === 2) rows.push(`${tds[0].innerText.trim()}: ${tds[1].innerText.trim()}`);
+    });
+    document.querySelectorAll('.list-group-item').forEach(item => {
+        const spans = item.querySelectorAll('span');
+        if (spans.length === 2) rows.push(`${spans[0].innerText.trim()}: ${spans[1].innerText.trim()}`);
+    });
+    const txt = rows.join('\n');
+    navigator.clipboard.writeText(txt).then(() => {
+        const btn = document.querySelector('.btn-outline-info');
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy Result', 2000);
+    });
+}
+
+function downloadResult() {
+    const rows = [['Field', 'Value']];
+    document.querySelectorAll('.table tr').forEach(tr => {
+        const tds = tr.querySelectorAll('td');
+        if (tds.length === 2) rows.push([tds[0].innerText.trim(), tds[1].innerText.trim()]);
+    });
+    document.querySelectorAll('.list-group-item').forEach(item => {
+        const spans = item.querySelectorAll('span');
+        if (spans.length === 2) rows.push([spans[0].innerText.trim(), spans[1].innerText.trim()]);
+    });
+    const csv = rows.map(r => r.map(v => '"' + v.replace(/"/g, '""') + '"').join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'detection_result.csv';
+    a.click();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Data Stats — ClinVar Cancer Detection{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1>Data Statistics</h1>
+        <p class="text-secondary">Overview of the loaded ClinVar dataset and feature pipeline.</p>
+    </div>
+</div>
+
+{% if data_exists %}
+<div class="row g-3">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="small text-secondary">Total Records</div>
+                <div class="fs-4 fw-bold">{{ stats.total_rows }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="small text-secondary">Columns</div>
+                <div class="fs-4 fw-bold">{{ stats.total_columns }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="small text-secondary">Pathogenic</div>
+                <div class="fs-4 fw-bold text-danger">{{ stats.pathogenic }} ({{ stats.pathogenic_pct }})</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="small text-secondary">Memory</div>
+                <div class="fs-4 fw-bold" title="{{ stats.get('memory_note', '') }}">{{ stats.memory_gb }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-3">
+    <div class="card-header">
+        <h5 class="mb-0">Feature Pipeline</h5>
+    </div>
+    <div class="card-body">
+        <p>The model uses <strong>{{ stats.feature_count }} fixed-dimension features</strong> for both training and inference:</p>
+        <div class="row g-2">
+            <div class="col-md-6">
+                <div class="border border-secondary rounded p-3">
+                    <h6 class="text-info">Numeric Features (4)</h6>
+                    <ul class="list-unstyled mb-0 small">
+                        {% for feat in stats.numeric_features %}
+                        <li>&bull; {{ feat }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="border border-secondary rounded p-3">
+                    <h6 class="text-warning">Categorical Features (2)</h6>
+                    <ul class="list-unstyled mb-0 small">
+                        {% for feat in stats.categorical_features %}
+                        <li>&bull; {{ feat }}</li>
+                        {% endfor %}
+                    </ul>
+                    <hr class="my-1">
+                    <h6 class="text-success">Derived (2)</h6>
+                    <ul class="list-unstyled mb-0 small">
+                        <li>&bull; ref_len (Ref_Allele length)</li>
+                        <li>&bull; alt_len (Alt_Allele length)</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-warning">Data file not found at <code>clinvar_extracted.csv</code>. Please complete extraction first.</div>
+{% endif %}
+{% endblock %}

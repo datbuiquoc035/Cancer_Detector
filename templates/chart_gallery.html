@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Charts — ClinVar Cancer Detection{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1>Chart Gallery</h1>
+        <p class="text-secondary">Saved training visualizations from all training runs.</p>
+    </div>
+</div>
+
+{% if charts %}
+<div class="row g-3">
+    {% for chart in charts %}
+    <div class="col-lg-4 col-md-6">
+        <div class="card">
+            <a href="{{ chart.url }}" target="_blank">
+                <img src="{{ chart.url }}" class="card-img-top p-2 chart-img-bg" alt="{{ chart.filename }}" style="object-fit: contain; max-height: 240px;">
+            </a>
+            <div class="card-body py-2">
+                <small class="text-secondary" title="{{ chart.filename }}">{{ chart.mtime }}</small>
+                <br>
+                <small class="text-muted">{{ chart.filename }}</small>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-warning">No charts found. Run training to generate visualizations.</div>
+{% endif %}
+{% endblock %}
