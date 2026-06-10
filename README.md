@@ -209,7 +209,7 @@ The system generates 6 chart types after training. Below are results from the la
 | F1-Score | 0.2006 |
 | PR-AUC | 0.5063 |
 
-### Loss & Accuracy Curves
+### Loss & Accuracy Curves(from model trained in 10/06/2026)
 ![Training Curves](output_clinvar/charts/curves_10062026_161042.png)
 
 ### Confusion Matrix
