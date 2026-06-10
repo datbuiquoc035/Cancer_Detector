@@ -199,13 +199,33 @@ Input (8 features) → Linear → BatchNorm → ReLU → Dropout
 
 ## Training Visualizations
 
-The system generates 6 chart types after training:
-1. **Loss Curves** — Train/validation loss over epochs
-2. **Accuracy Curves** — Train/validation accuracy with best marked
-3. **Confusion Matrix** — True vs predicted classifications
-4. **ROC Curve** — With AUC score
-5. **Precision-Recall Curve** — With PR-AUC score
-6. **Probability Distribution** — Separated by benign/pathogenic classes
+The system generates 6 chart types after training. Below are results from the latest training run (40 epochs, 50K samples):
+
+| Metric | Value |
+|--------|-------|
+| Accuracy | 89.64% |
+| Best Validation Accuracy | 89.84% |
+| AUC | 0.8464 |
+| F1-Score | 0.2006 |
+| PR-AUC | 0.5063 |
+
+### Loss & Accuracy Curves
+![Training Curves](output_clinvar/charts/curves_10062026_161042.png)
+
+### Confusion Matrix
+![Confusion Matrix](output_clinvar/charts/cm_10062026_161042.png)
+
+### ROC Curve
+![ROC Curve](output_clinvar/charts/roc_10062026_161042.png)
+
+### Precision-Recall Curve
+![Precision-Recall Curve](output_clinvar/charts/pr_10062026_161042.png)
+
+### Prediction Probability Distribution
+![Probability Distribution](output_clinvar/charts/probability_dist_10062026_161042.png)
+
+### Class Distribution
+![Class Distribution](output_clinvar/charts/distribution_10062026_161042.png)
 
 ## Command-Line Usage
 

@@ -12,7 +12,6 @@ build/
 # Model files
 output_clinvar/clinvar_model_*.pt
 output_clinvar/config_*.json
-output_clinvar/charts/
 
 # Data
 clinvar_extracted.csv
