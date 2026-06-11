@@ -7,11 +7,6 @@ FEATURE_COUNT = len(NUMERIC_FEATURES) + len(CATEGORICAL_FEATURES) + 2
 
 REQUIRED_COLUMNS = NUMERIC_FEATURES + CATEGORICAL_FEATURES + ['Ref_Allele', 'Alt_Allele', 'Clinical_Significance']
 
-CHROMOSOME_MAP = {str(i): i for i in range(1, 23)}
-CHROMOSOME_MAP.update({'X': 23, 'Y': 24, 'MT': 25, 'M': 25})
-
-def encode_chromosome(chromosome):
-    return float(CHROMOSOME_MAP.get(str(chromosome).upper(), 0))
 
 def _to_float(value, fallback=0.0):
     try:
@@ -68,7 +63,11 @@ def extract_features_from_df(df, label_encoders=None, fit_encoders=False):
         else:
             le = label_encoders.get(col) if label_encoders else None
             if le:
-                encoded = series.map(lambda x: le.transform([x])[0] if x in le.classes_ else 0).astype(int)
+                unseen_mask = ~series.isin(le.classes_)
+                encoded = le.transform(series[~unseen_mask])
+                result = pd.Series(0, index=series.index, dtype=int)
+                result[~unseen_mask] = encoded
+                encoded = result.values
             else:
                 encoded = np.zeros(len(df), dtype=int)
         feature_arrays.append(np.array(encoded, dtype=float).reshape(-1, 1))

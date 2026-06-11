@@ -5,21 +5,30 @@ Detects cancer-related variants and predicts specific cancer types with confiden
 
 import os
 import glob
+import logging
 import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from features import preprocess_variant
 from trainer import ClinVarNet
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+logger = logging.getLogger(__name__)
+
+try:
+    torch.serialization.add_safe_globals([StandardScaler, LabelEncoder])
+except Exception:
+    pass
 
 
-def _find_latest_model(output_dir=None):
-    if output_dir is None:
-        output_dir = os.path.join(os.path.dirname(__file__), 'output_clinvar')
-    if os.path.exists(output_dir):
-        pt_files = glob.glob(os.path.join(output_dir, 'clinvar_model_*.pt'))
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output_clinvar')
+
+
+def _find_latest_model():
+    if os.path.exists(OUTPUT_DIR):
+        pt_files = glob.glob(os.path.join(OUTPUT_DIR, 'model_*.pt')) + glob.glob(os.path.join(OUTPUT_DIR, 'clinvar_model_*.pt'))
         if pt_files:
             return max(pt_files, key=os.path.getmtime)
     return None
@@ -133,17 +142,21 @@ class ClinVarCancerDetector:
         self.gene_db = CANCER_GENE_DATABASE
 
         self._load_model()
-        print("ClinVar Cancer Detector initialized")
-        print(f"  Device: {device}")
-        print(f"  Model: {model_path}")
-        print(f"  Cancer genes in database: {len(self.gene_db)}")
+        logger.info("ClinVar Cancer Detector initialized")
+        logger.info(f"  Device: {device}")
+        logger.info(f"  Model: {model_path}")
+        logger.info(f"  Cancer genes in database: {len(self.gene_db)}")
 
     def _load_model(self):
         """Load trained model from file"""
         if not os.path.exists(self.model_path):
             raise FileNotFoundError(f"Model not found at: {self.model_path}")
 
-        checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
+        try:
+            checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=True)
+        except Exception:
+            logger.warning("weights_only=True failed, falling back to weights_only=False. Ensure the checkpoint is from a trusted source.")
+            checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
 
         self.input_dim = checkpoint.get('input_dim')
         if self.input_dim is None:
@@ -171,7 +184,7 @@ class ClinVarCancerDetector:
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.model.eval()
 
-        print(f"  Model loaded successfully (input_dim={self.input_dim})")
+        logger.info(f"  Model loaded successfully (input_dim={self.input_dim})")
 
     def preprocess_variant(self, chromosome, position, gene='UNKNOWN', variant_type='SNP',
                            ref_allele='', alt_allele='', variation_id=0,
@@ -326,55 +339,91 @@ class ClinVarCancerDetector:
         }
 
     def detect_from_csv(self, csv_path, output_path=None):
-        """
-        Process a CSV file of variants and detect cancer types
-
-        Parameters:
-        -----------
-        csv_path : str
-            Path to input CSV file
-        output_path : str, optional
-            Path to save results CSV
-
-        Returns:
-        --------
-        pd.DataFrame : Results with cancer predictions
-        """
         df = pd.read_csv(csv_path)
-        results = []
 
-        for idx, row in df.iterrows():
-            result = self.detect(
-                chromosome=row.get('Chromosome', row.get('CHR', 1)),
-                position=row.get('Position', row.get('POS', 0)),
-                gene=row.get('Gene', row.get('GeneSymbol', 'UNKNOWN')),
-                variant_type=row.get('Variant_Type', row.get('VariationType', 'SNP')),
-                ref_allele=row.get('Ref_Allele', ''),
-                alt_allele=row.get('Alt_Allele', ''),
-                variation_id=row.get('VariationID', 0),
-                chr_grch38=row.get('CHR_GRCh38', 0),
-                start_grch38=row.get('Start_GRCh38', 0),
-                stop_grch38=row.get('Stop_GRCh38', 0),
-                clinical_significance=row.get('Clinical_Significance', '')
+        norm_cols = {
+            'chromosome': ['Chromosome', 'CHR', 'CHR_GRCh38'],
+            'position': ['Position', 'POS', 'Start_GRCh38'],
+            'gene': ['Gene', 'GeneSymbol'],
+            'variant_type': ['Variant_Type', 'VariationType'],
+            'ref_allele': ['Ref_Allele'],
+            'alt_allele': ['Alt_Allele'],
+            'variation_id': ['VariationID'],
+            'chr_grch38': ['CHR_GRCh38'],
+            'start_grch38': ['Start_GRCh38'],
+            'stop_grch38': ['Stop_GRCh38'],
+            'clinical_significance': ['Clinical_Significance'],
+        }
+
+        def _pick(cols):
+            for c in cols:
+                if c in df.columns:
+                    return df[c]
+            return pd.Series([None] * len(df))
+
+        chromosomes = _pick(norm_cols['chromosome']).fillna('1').astype(str)
+        positions = _pick(norm_cols['position']).fillna(0).astype(int)
+        genes = _pick(norm_cols['gene']).fillna('UNKNOWN').astype(str)
+        variant_types = _pick(norm_cols['variant_type']).fillna('SNP').astype(str)
+        ref_alleles = _pick(norm_cols['ref_allele']).fillna('')
+        alt_alleles = _pick(norm_cols['alt_allele']).fillna('')
+        variation_ids = _pick(norm_cols['variation_id']).fillna(0).astype(int)
+        chr_grch38_vals = _pick(norm_cols['chr_grch38']).fillna(0).astype(int)
+        start_grch38_vals = _pick(norm_cols['start_grch38']).fillna(0).astype(int)
+        stop_grch38_vals = _pick(norm_cols['stop_grch38']).fillna(0).astype(int)
+        clin_sig_vals = _pick(norm_cols['clinical_significance']).fillna('').astype(str)
+
+        all_features = []
+        for i in range(len(df)):
+            feats = self.preprocess_variant(
+                chromosome=chromosomes.iloc[i],
+                position=int(positions.iloc[i]),
+                gene=genes.iloc[i],
+                variant_type=variant_types.iloc[i],
+                ref_allele=str(ref_alleles.iloc[i]),
+                alt_allele=str(alt_alleles.iloc[i]),
+                variation_id=int(variation_ids.iloc[i]),
+                chr_grch38=int(chr_grch38_vals.iloc[i]),
+                start_grch38=int(start_grch38_vals.iloc[i]),
+                stop_grch38=int(stop_grch38_vals.iloc[i]),
             )
+            all_features.append(feats)
+
+        if len(all_features) == 0:
+            return pd.DataFrame()
+
+        features_batch = np.vstack(all_features)
+        features_scaled = self.scaler.transform(features_batch)
+        X_tensor = torch.FloatTensor(features_scaled).to(self.device)
+
+        with torch.no_grad():
+            probs = self.model(X_tensor).cpu().numpy().flatten()
+
+        results = []
+        for i in range(len(df)):
+            cancer_prob = float(probs[i])
+            is_pathogenic = cancer_prob >= 0.5
+            risk_level = self.get_risk_level(cancer_prob)
+            gene_name = str(genes.iloc[i])
+            cancer_type_pred = self.predict_cancer_type(gene_name, cancer_prob)
 
             results.append({
-                'Chromosome': result['variant_info']['chromosome'],
-                'Position': result['variant_info']['position'],
-                'Gene': result['variant_info']['gene'],
-                'Variant_Type': result['variant_info']['variant_type'],
-                'Cancer_Probability_%': result['cancer_detection']['cancer_probability'],
-                'Risk_Level': result['cancer_detection']['risk_level'],
-                'Is_Pathogenic': result['cancer_detection']['is_pathogenic'],
-                'Top_Cancer_Type': result['cancer_type_prediction']['top_cancer_type'],
-                'Top_Confidence_%': round(result['cancer_type_prediction']['top_confidence'], 2)
+                'Chromosome': chromosomes.iloc[i],
+                'Position': int(positions.iloc[i]),
+                'Gene': gene_name,
+                'Variant_Type': variant_types.iloc[i],
+                'Cancer_Probability_%': round(cancer_prob * 100, 2),
+                'Risk_Level': risk_level,
+                'Is_Pathogenic': is_pathogenic,
+                'Top_Cancer_Type': cancer_type_pred['top_cancer_type'],
+                'Top_Confidence_%': round(cancer_type_pred['top_confidence'], 2),
             })
 
         results_df = pd.DataFrame(results)
 
         if output_path:
             results_df.to_csv(output_path, index=False)
-            print(f"Results saved to: {output_path}")
+            logger.info(f"Results saved to: {output_path}")
 
         return results_df
 

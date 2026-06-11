@@ -2,6 +2,7 @@ import os
 import time
 import json
 import random
+import uuid as _uuid
 import threading
 from collections import deque
 from datetime import datetime
@@ -23,7 +24,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings('ignore', category=UserWarning, module='sklearn')
 
 
 class ClinVarNet(nn.Module):
@@ -52,11 +53,15 @@ class ClinVarNet(nn.Module):
 
 
 class Trainer:
-    def __init__(self, log_queue: Queue):
+    def __init__(self, log_queue: Queue, output_dir: str = ''):
         self.log_queue = log_queue
+        self.output_dir = output_dir
         self.log_buffer = deque(maxlen=200)
-        self.is_training = False
-        self.stop_requested = False
+        self._log_buffer_lock = threading.Lock()
+        self._is_training = False
+        self._stop_requested = False
+        self._training_event = threading.Event()
+        self._stop_event = threading.Event()
         self.model: Optional[ClinVarNet] = None
         self.scaler: Optional[StandardScaler] = None
         self.label_encoders: Dict[str, LabelEncoder] = {}
@@ -84,10 +89,27 @@ class Trainer:
         self.chart_dir: Optional[str] = None
         self.chart_files: Dict[str, str] = {}
 
+    @property
+    def is_training(self) -> bool:
+        return self._is_training
+
+    @property
+    def stop_requested(self) -> bool:
+        return self._stop_requested
+
+    @stop_requested.setter
+    def stop_requested(self, value: bool):
+        self._stop_requested = value
+        if value:
+            self._stop_event.set()
+        else:
+            self._stop_event.clear()
+
     def log(self, message: str):
         msg = {'type': 'log', 'message': message}
         self.log_queue.put(msg)
-        self.log_buffer.append(msg)
+        with self._log_buffer_lock:
+            self.log_buffer.append(msg)
 
     def emit_metrics(self, epoch: int, total_epochs: int, train_loss: float, train_acc: float,
                      val_loss: float, val_acc: float, best_val_acc: float, eta_str: str):
@@ -125,8 +147,10 @@ class Trainer:
         self.log_buffer.append(msg)
 
     def get_state(self) -> dict:
+        with self._log_buffer_lock:
+            log_buffer_copy = list(self.log_buffer)
         return {
-            'is_training': self.is_training,
+            'is_training': self._is_training,
             'current_epoch': self.current_epoch,
             'total_epochs': self.total_epochs,
             'train_loss': self.train_loss,
@@ -136,7 +160,7 @@ class Trainer:
             'best_val_acc': self.best_val_acc,
             'eta': self.eta_str,
             'progress': ((self.current_epoch + 1) / self.total_epochs * 100) if self.total_epochs > 0 else 0,
-            'log_buffer': list(self.log_buffer),
+            'log_buffer': log_buffer_copy,
         }
 
     def set_seed(self, seed: int):
@@ -215,13 +239,16 @@ class Trainer:
               scheduler_type: str = "ReduceLROnPlateau", gradient_clip: float = 1.0,
               use_class_weights: bool = True, random_seed: int = 42,
               sample_size: int = 50000):
-        self.is_training = True
-        self.stop_requested = False
+        self._is_training = True
+        self._stop_requested = False
+        self._training_event.set()
+        self._stop_event.clear()
         self.epoch_history = []
         self.loss_history = []
         self.acc_history = []
         self.val_loss_history = []
         self.val_acc_history = []
+        self.chart_files = {}
 
         if hidden_dims is None:
             hidden_dims = [128, 64, 32]
@@ -294,7 +321,7 @@ class Trainer:
             epoch_times = []
 
             for epoch in range(epochs):
-                if self.stop_requested:
+                if self._stop_requested:
                     self.log("Training stopped by user")
                     break
 
@@ -377,11 +404,12 @@ class Trainer:
             for param_group in self.optimizer.param_groups:
                 self._learning_rates.append(param_group['lr'])
 
-            timestamp = datetime.now().strftime("%d%m%Y_%H%M%S")
-            chart_dir = os.path.join(os.path.dirname(data_path), 'output_clinvar')
-            chart_files = self.save_charts(chart_dir, timestamp)
+            model_id = _uuid.uuid4().hex[:12]
+            chart_dir = self.output_dir if self.output_dir else os.path.join(os.path.dirname(data_path), 'output_clinvar')
+            chart_files = self.save_charts(chart_dir, model_id)
 
             final_metrics = {
+                'model_id': model_id,
                 'accuracy': round(final_acc, 4),
                 'auc': round(final_auc, 4),
                 'f1': round(final_f1, 4),
@@ -389,7 +417,6 @@ class Trainer:
                 'best_val_acc': round(best_val_acc, 4),
                 'confusion_matrix': cm.tolist(),
                 'chart_files': chart_files,
-                'timestamp': timestamp,
             }
 
             save_config = {
@@ -406,8 +433,8 @@ class Trainer:
                 'random_seed': random_seed,
                 'sample_size': sample_size,
             }
-            output_dir = os.path.join(os.path.dirname(data_path), 'output_clinvar')
-            self.save_checkpoint(output_dir, save_config, timestamp)
+            save_dir = self.output_dir if self.output_dir else os.path.join(os.path.dirname(data_path), 'output_clinvar')
+            self.save_checkpoint(save_dir, save_config, model_id)
             self.emit_complete(final_metrics)
 
         except RuntimeError as e:
@@ -421,7 +448,8 @@ class Trainer:
             self.log(f"ERROR: {str(e)}")
             self.emit_error(str(e))
         finally:
-            self.is_training = False
+            self._is_training = False
+            self._training_event.clear()
 
     def _train_epoch(self, X_train, y_train, X_val, y_val, batch_size):
         self.model.train()
@@ -473,7 +501,7 @@ class Trainer:
         avg_train_loss = total_loss / max(num_batches, 1)
         return avg_train_loss, train_acc, val_loss, val_acc, auc_score, f1, precision, recall
 
-    def save_charts(self, save_dir: str, timestamp: str):
+    def save_charts(self, save_dir: str, model_id: str):
         chart_dir = os.path.join(save_dir, 'charts')
         os.makedirs(chart_dir, exist_ok=True)
         self.chart_dir = chart_dir
@@ -502,12 +530,12 @@ class Trainer:
         axes[1].legend()
         axes[1].grid(alpha=0.3)
 
-        fig1.suptitle(f'Training History — {timestamp}', fontsize=14, y=1.02)
+        fig1.suptitle(f'Training History — {model_id}', fontsize=14, y=1.02)
         fig1.tight_layout()
-        curves_path = os.path.join(chart_dir, f'curves_{timestamp}.png')
+        curves_path = os.path.join(chart_dir, f'curves_{model_id}.png')
         fig1.savefig(curves_path, dpi=150, bbox_inches='tight')
         plt.close(fig1)
-        self.chart_files['curves'] = f'curves_{timestamp}.png'
+        self.chart_files['curves'] = f'curves_{model_id}.png'
 
         # 2. Confusion Matrix
         fig2, ax_cm = plt.subplots(figsize=(5, 4.5))
@@ -527,10 +555,10 @@ class Trainer:
         ax_cm.set_ylabel('Actual')
         ax_cm.set_title('Confusion Matrix (Validation Set)')
         fig2.tight_layout()
-        cm_path = os.path.join(chart_dir, f'cm_{timestamp}.png')
+        cm_path = os.path.join(chart_dir, f'cm_{model_id}.png')
         fig2.savefig(cm_path, dpi=150, bbox_inches='tight')
         plt.close(fig2)
-        self.chart_files['cm'] = f'cm_{timestamp}.png'
+        self.chart_files['cm'] = f'cm_{model_id}.png'
 
         # 3. Class Distribution
         fig3, ax_dist = plt.subplots(figsize=(6, 4))
@@ -544,10 +572,10 @@ class Trainer:
         ax_dist.set_ylabel('Count')
         ax_dist.grid(axis='y', alpha=0.3)
         fig3.tight_layout()
-        dist_path = os.path.join(chart_dir, f'distribution_{timestamp}.png')
+        dist_path = os.path.join(chart_dir, f'distribution_{model_id}.png')
         fig3.savefig(dist_path, dpi=150, bbox_inches='tight')
         plt.close(fig3)
-        self.chart_files['distribution'] = f'distribution_{timestamp}.png'
+        self.chart_files['distribution'] = f'distribution_{model_id}.png'
 
         # 4. ROC Curve
         from sklearn.metrics import roc_curve
@@ -566,10 +594,10 @@ class Trainer:
         ax_roc.set_xlim(-0.02, 1.02)
         ax_roc.set_ylim(-0.02, 1.02)
         fig4.tight_layout()
-        roc_path = os.path.join(chart_dir, f'roc_{timestamp}.png')
+        roc_path = os.path.join(chart_dir, f'roc_{model_id}.png')
         fig4.savefig(roc_path, dpi=150, bbox_inches='tight')
         plt.close(fig4)
-        self.chart_files['roc'] = f'roc_{timestamp}.png'
+        self.chart_files['roc'] = f'roc_{model_id}.png'
 
         # 5. Precision-Recall Curve
         precision_vals, recall_vals, _ = precision_recall_curve(y_true, y_proba)
@@ -587,10 +615,10 @@ class Trainer:
         ax_pr.legend(loc='upper right')
         ax_pr.grid(alpha=0.3)
         fig5.tight_layout()
-        pr_path = os.path.join(chart_dir, f'pr_{timestamp}.png')
+        pr_path = os.path.join(chart_dir, f'pr_{model_id}.png')
         fig5.savefig(pr_path, dpi=150, bbox_inches='tight')
         plt.close(fig5)
-        self.chart_files['pr'] = f'pr_{timestamp}.png'
+        self.chart_files['pr'] = f'pr_{model_id}.png'
 
         # 6. Prediction Probability Distribution
         fig6, (ax_hist0, ax_hist1) = plt.subplots(1, 2, figsize=(12, 4), sharey=True)
@@ -610,21 +638,21 @@ class Trainer:
             ax.grid(alpha=0.3)
         fig6.suptitle('Prediction Probability Distribution', fontsize=13)
         fig6.tight_layout()
-        prob_path = os.path.join(chart_dir, f'probability_dist_{timestamp}.png')
+        prob_path = os.path.join(chart_dir, f'probability_dist_{model_id}.png')
         fig6.savefig(prob_path, dpi=150, bbox_inches='tight')
         plt.close(fig6)
-        self.chart_files['probability_dist'] = f'probability_dist_{timestamp}.png'
+        self.chart_files['probability_dist'] = f'probability_dist_{model_id}.png'
 
         self.log(f"Charts saved to: {chart_dir}")
         return self.chart_files
 
-    def save_checkpoint(self, save_dir: str, config: dict, timestamp: str = '') -> str:
+    def save_checkpoint(self, save_dir: str, config: dict, model_id: str = '') -> str:
         if self.model is None:
             raise ValueError("No model to save")
 
-        if not timestamp:
-            timestamp = datetime.now().strftime("%d%m%Y_%H%M%S")
-        model_path = os.path.join(save_dir, f"clinvar_model_{timestamp}.pt")
+        if not model_id:
+            model_id = _uuid.uuid4().hex[:12]
+        model_path = os.path.join(save_dir, f"model_{model_id}.pt")
 
         final_metrics = {
             'accuracy': round(getattr(self, 'final_accuracy', 0), 4),
@@ -637,7 +665,7 @@ class Trainer:
 
         full_config = {
             **config,
-            'timestamp': timestamp,
+            'model_id': model_id,
             'final_metrics': final_metrics,
         }
 
@@ -649,7 +677,7 @@ class Trainer:
             'config': full_config,
         }, model_path)
 
-        config_path = os.path.join(save_dir, f"config_{timestamp}.json")
+        config_path = os.path.join(save_dir, f"config_{model_id}.json")
         with open(config_path, 'w') as f:
             json.dump(full_config, f, indent=2)
 

@@ -25,21 +25,30 @@
                 <form id="train-form">
                     <input type="hidden" name="data_path" value="{{ data_path }}">
 
+                    <div class="mb-2">
+                        <label class="form-label small">Preset</label>
+                        <div class="d-flex gap-1" id="preset-group">
+                            <button type="button" class="btn btn-outline-success btn-sm flex-fill active" data-preset="quick" onclick="applyPreset('quick')">Quick</button>
+                            <button type="button" class="btn btn-outline-success btn-sm flex-fill" data-preset="balanced" onclick="applyPreset('balanced')">Balanced</button>
+                            <button type="button" class="btn btn-outline-success btn-sm flex-fill" data-preset="thorough" onclick="applyPreset('thorough')">Thorough</button>
+                        </div>
+                    </div>
+
                     <div class="row mb-2">
                         <div class="col-6">
                             <label class="form-label small">Epochs</label>
-                            <input type="number" class="form-control form-control-sm" name="epochs" value="5" min="1" max="500">
+                            <input type="number" class="form-control form-control-sm" name="epochs" value="5" min="1" max="500" id="f-epochs">
                         </div>
                         <div class="col-6">
                             <label class="form-label small">Batch Size</label>
-                            <input type="number" class="form-control form-control-sm" name="batch_size" value="64" min="8" max="512">
+                            <input type="number" class="form-control form-control-sm" name="batch_size" value="64" min="8" max="512" id="f-batch">
                         </div>
                     </div>
 
                     <div class="row mb-2">
                         <div class="col-6">
                             <label class="form-label small">Learning Rate</label>
-                            <input type="number" step="0.0001" class="form-control form-control-sm" name="learning_rate" value="0.001">
+                            <input type="number" step="0.0001" class="form-control form-control-sm" name="learning_rate" value="0.001" id="f-lr">
                         </div>
                         <div class="col-6">
                             <label class="form-label small">Dropout</label>
@@ -61,18 +70,11 @@
                     <div class="row mb-2">
                         <div class="col-6">
                             <label class="form-label small">Scheduler</label>
-                            <div class="custom-select">
-                                <button class="custom-select-btn" type="button" onclick="toggleCustomSelect(this)">
-                                    <span class="custom-select-label">ReduceLROnPlateau</span>
-                                    <span class="arrow">&#9660;</span>
-                                </button>
-                                <div class="custom-select-menu">
-                                    <button class="custom-select-item active" type="button" data-value="ReduceLROnPlateau" onclick="selectCustomOption(this)">ReduceLROnPlateau</button>
-                                    <button class="custom-select-item" type="button" data-value="CosineAnnealing" onclick="selectCustomOption(this)">CosineAnnealing</button>
-                                    <button class="custom-select-item" type="button" data-value="StepLR" onclick="selectCustomOption(this)">StepLR</button>
-                                </div>
-                                <input type="hidden" name="scheduler_type" value="ReduceLROnPlateau">
-                            </div>
+                            <select class="form-select form-select-sm" name="scheduler_type">
+                                <option value="ReduceLROnPlateau">ReduceLROnPlateau</option>
+                                <option value="CosineAnnealing">CosineAnnealing</option>
+                                <option value="StepLR">StepLR</option>
+                            </select>
                         </div>
                         <div class="col-6">
                             <label class="form-label small">Gradient Clip</label>
@@ -230,6 +232,27 @@
 
 {% block scripts %}
 <script>
+const PRESETS = {
+    quick: { epochs: 5, batch_size: 64, lr: 0.001, dropout: 0.3, hidden: '128,64,32', scheduler: 'ReduceLROnPlateau', gradient_clip: 1.0, sample_size: 50000 },
+    balanced: { epochs: 20, batch_size: 128, lr: 0.0005, dropout: 0.4, hidden: '256,128,64', scheduler: 'CosineAnnealing', gradient_clip: 0.5, sample_size: 100000 },
+    thorough: { epochs: 50, batch_size: 256, lr: 0.0003, dropout: 0.5, hidden: '512,256,128', scheduler: 'CosineAnnealing', gradient_clip: 0.5, sample_size: 200000 },
+};
+
+function applyPreset(name) {
+    const p = PRESETS[name];
+    if (!p) return;
+    document.querySelectorAll('#preset-group .btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`[data-preset="${name}"]`).classList.add('active');
+    document.getElementById('f-epochs').value = p.epochs;
+    document.getElementById('f-batch').value = p.batch_size;
+    document.getElementById('f-lr').value = p.lr;
+    document.querySelector('[name="dropout"]').value = p.dropout;
+    document.querySelector('[name="hidden_dims"]').value = p.hidden;
+    document.querySelector('[name="scheduler_type"]').value = p.scheduler;
+    document.querySelector('[name="gradient_clip"]').value = p.gradient_clip;
+    document.querySelector('[name="sample_size"]').value = p.sample_size;
+}
+
 let eventSource = null;
 const logOutput = document.getElementById('log-output');
 const startBtn = document.getElementById('start-btn');
@@ -354,14 +377,6 @@ function showFinalMetrics(metrics) {
     finalMetrics.style.display = 'block';
     const row = document.getElementById('final-metrics-row');
     row.innerHTML = '';
-    map.labels = {
-        'chart-curves': 'Training Curves',
-        'chart-cm': 'Confusion Matrix',
-        'chart-dist': 'Class Distribution',
-        'chart-roc': 'ROC Curve',
-        'chart-pr': 'PR Curve',
-        'chart-probability_dist': 'Probability Distribution',
-    };
     const items = [
         {label: 'Accuracy', value: (metrics.accuracy * 100).toFixed(1) + '%'},
         {label: 'AUC', value: metrics.auc.toFixed(4)},

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Error {{ code }}{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-12 text-center py-5">
+        <h1 class="display-1 fw-bold text-secondary">{{ code }}</h1>
+        <p class="fs-5 text-secondary mb-4">{{ message }}</p>
+        <a href="/" class="btn btn-outline-success">Back to Home</a>
+    </div>
+</div>
+{% endblock %}

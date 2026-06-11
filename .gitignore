@@ -10,8 +10,10 @@ dist/
 build/
 
 # Model files
-output_clinvar/clinvar_model_*.pt
-output_clinvar/config_*.json
+output_clinvar/*.pt
+output_clinvar/*.json
+output_clinvar/charts/
+!output_clinvar/.gitkeep
 
 # Data
 clinvar_extracted.csv
